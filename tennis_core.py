@@ -24,21 +24,36 @@ FACTORS = [
 ]
 
 
+def _download(tour, y, f, errors):
+    for br in ("master", "main"):
+        url = BASE[tour].replace("/master/", f"/{br}/").format(y=y)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = r.read()
+            with open(f, "wb") as fh:
+                fh.write(data)
+            return True
+        except Exception as e:
+            errors.append(f"{y} ({br}): {type(e).__name__}: {e}")
+    return False
+
+
 def load(tour, refresh=False):
     os.makedirs(DATA, exist_ok=True)
-    now, frames = pd.Timestamp.today(), []
+    now, frames, errors = pd.Timestamp.today(), [], []
     for y in range(now.year - YEARS + 1, now.year + 1):
         f = f"{DATA}/{tour}_{y}.csv"
         stale = (not os.path.exists(f)) or (y == now.year and (refresh or time.time() - os.path.getmtime(f) > 86400))
         if stale:
+            _download(tour, y, f, errors)
+        if os.path.exists(f):
             try:
-                urllib.request.urlretrieve(BASE[tour].format(y=y), f)
-            except Exception:
-                if not os.path.exists(f):
-                    continue
-        frames.append(pd.read_csv(f))
+                frames.append(pd.read_csv(f))
+            except Exception as e:
+                errors.append(f"{y}: skaitymo klaida {e}")
     if not frames:
-        raise RuntimeError("Nepavyko gauti duomenų. Patikrink internetą arba įdėk CSV į data/ aplanką.")
+        raise RuntimeError("Nepavyko gauti duomenų. Klaidos: " + " | ".join(errors[:4]))
     df = pd.concat(frames, ignore_index=True)
     df["date"] = pd.to_datetime(df.tourney_date.astype(int).astype(str), format="%Y%m%d")
     return df.sort_values("date").reset_index(drop=True)
